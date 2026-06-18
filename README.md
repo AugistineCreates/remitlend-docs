@@ -14,6 +14,7 @@ Welcome to the RemitLend documentation repository. This repo contains design doc
 **Want to add or edit docs?** Start here: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 The guide covers:
+
 - How to add or edit documentation
 - Style guide (headings, code blocks, mermaid diagrams)
 - Document templates (reference, how-to, design pages)
@@ -22,6 +23,7 @@ The guide covers:
 ## Documentation Standards
 
 We maintain consistency across docs through:
+
 - **Markdown style guide** – Headings, code blocks, links, and emphasis
 - **Diagram conventions** – Mermaid for state machines, flowcharts, and architecture
 - **Tone & voice** – Clear, direct, encouraging
