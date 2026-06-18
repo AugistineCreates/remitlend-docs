@@ -4,7 +4,7 @@ This document explains how Remitlend synchronizes on-chain Soroban events with t
 
 ## Role of the Event Indexer
 
-The `EventIndexer` service in the backend acts as a bridge. It polls the Stellar RPC node for contract events, decodes them, and stores the relevant data in our local database.
+The `EventIndexer` service in the backend acts as a bridge. It polls the Stellar RPC node for contract events, decodes them, and stores the relevant data in our local database. It also handles webhook dispatch and notification side effects when critical events occur.
 
 ## Synchronization Workflow
 
@@ -13,26 +13,31 @@ sequenceDiagram
     participant RPC as Stellar RPC (Soroban)
     participant Indexer as EventIndexer Service
     participant DB as PostgreSQL Database
-    participant Oracle as Backend Oracle
+    participant Webhook as Webhook Dispatcher
+    participant Notifier as Notification Service
 
     loop Every pollIntervalMs
-        Indexer->>DB: Get last_indexed_ledger
-        DB-->>Indexer: 123456
+        Indexer->>DB: Get last_indexed_cursor
+        DB-->>Indexer: cursor_value
         
-        Indexer->>RPC: getEvents(startLedger=123457, contractId=...)
+        Indexer->>RPC: getEvents(startCursor=cursor_value, contractId=...)
         RPC-->>Indexer: [Event1, Event2, ...]
         
         Indexer->>Indexer: Decode XDR Topics & Value
         
         alt Event is LoanRequested
-            Indexer->>DB: INSERT into loan_events
+            Indexer->>DB: INSERT into loan_events (deduplicated by event_id)
             DB-->>Indexer: Success
+            Indexer->>Webhook: Dispatch LoanRequested payload
+            Indexer->>Notifier: Send User Notification
         else Event is LoanRepaid
             Indexer->>DB: UPDATE user_score (+15 points)
             DB-->>Indexer: Success
+            Indexer->>Webhook: Dispatch LoanRepaid payload
+            Indexer->>Notifier: Send User Notification
         end
         
-        Indexer->>DB: Update last_indexed_ledger (123457)
+        Indexer->>DB: Update last_indexed_cursor (latest_cursor)
     end
 ```
 
@@ -49,16 +54,21 @@ The indexer runs as a background process (`indexerManager.ts`) that initiates pe
 - **Value**: Decoded from XDR base64 based on the event type (e.g., `amount` for `LoanRequested`).
 
 ### 3. Database Schema
-- **indexer_state**: Tracks the current synchronization point (`last_indexed_ledger`, `last_indexed_cursor`).
+- **indexer_state**: Tracks the current synchronization point (`last_indexed_cursor`).
 - **loan_events**: Stores every decoded event for auditing and history.
 - **scores**: Maintains the current credit score for each user, updated in real-time by the indexer.
 
-### 4. Resiliency & Reliability
-- **State Persistence**: The indexer always resumes from the last successfully indexed ledger.
+### 4. Side Effects & Integrations
+- **Webhook Dispatch**: Once an event is successfully stored or processed in the database, the indexer triggers a webhook payload to registered external services.
+- **Notifications**: Users are notified immediately (e.g., via email or push) after specific events like `LoanRepaid` or `LoanRequested` are successfully processed.
+
+### 5. Resiliency & Reliability
+- **Cursor Persistence**: The indexer always persists the `last_indexed_cursor` after successfully processing a batch of events, ensuring it resumes exactly where it left off.
+- **Deduplication**: We handle overlapping events or RPC retries by using `ON CONFLICT (event_id) DO NOTHING`. This ensures idempotency even if the same cursor range is processed twice.
 - **Transactions**: Event storage and score updates are wrapped in a database transaction to ensure atomicity.
-- **Conflict Handling**: Uses `ON CONFLICT (event_id) DO NOTHING` to prevent duplicate processing of the same event.
+- **Failure and Resume Behavior**: If the indexer crashes or the RPC node times out mid-batch, the `last_indexed_cursor` is not updated. On restart, the indexer queries the last successfully saved cursor and resumes polling from that exact point, relying on deduplication to safely skip any partially processed events.
 
 ## Key Files
-- `backend/src/services/eventIndexer.ts`: Core logic for polling and processing.
+- `backend/src/services/eventIndexer.ts`: Core logic for polling, cursor persistence, deduplication, webhooks, and notifications.
 - `backend/src/services/indexerManager.ts`: Lifecycle management for the indexer.
 - `backend/src/db/connection.js`: Database connection and query execution.
