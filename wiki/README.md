@@ -1,7 +1,7 @@
 # Contributor Wiki (In-Repo)
 
 This folder is a GitHub Wiki-style set of documents that live in the repo so they can be reviewed via PRs.
-
+**Before contributing, please read [CONTRIBUTING.md](../CONTRIBUTING.md)** for style guidelines, templates, and PR expectations.
 ## Contents
 
 - [Soroban Contract State Machine](./contract-state-machine.md)
